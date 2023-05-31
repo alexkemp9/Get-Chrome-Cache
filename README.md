@@ -2,13 +2,15 @@
 A PERL Script to Extract all Files Saved within the local Chrome/Chromium Cache
 
 ## *Basics*
-This script file is designed for use by any-user (no root access required) within a Terminal. It’s principal purpose is to make it easy & reliable to extract all files from the current Chrome / Chromium cache into a dir of your choice. These are mostly various image & text files. In addition to PERL, the main utilities required are BROTLI, CONVERT (part of ImageMagick-ims6.q16 suite), DD, GUNZIP & TOUCH. These are Apps are tested at program start to make sure that they are available. Also within the *Global CONSTANTS* are `$IN` & `$OUT`:–
+This script file `getCC` is designed for use by any-user (no root access required) within a Terminal. It’s principal purpose is to make it easy & reliable to extract all files from the current Chrome / Chromium cache into a dir of your choice. These are mostly various image & text files. In addition to PERL, the main utilities required are BROTLI, CONVERT (part of ImageMagick-ims6.q16 suite), DD, GUNZIP & TOUCH. These are Apps are tested at program start to make sure that they are available. Also within the *Global CONSTANTS* are `$IN` & `$OUT`:–
 
 * `$IN` : disk location for the CHROME Cache
 * `$OUT` : disk location for files extracted from the CHROME Cache
 
+A final important App is `webp-pixbuf-loader` (to install: `sudo apt install webp-pixbuf-loader`). That will add WEBP-support to imagemagick (and other GDK progs such as YAD), and that will be required for producing Thumbnails of the increasingly-common webp-image files.
+
 ## *Begin*
-The following will assume that you have created a dir `~/.local/sbin` within which you store the bash-file; this is to set the script as executable for current user only:
+The following will assume that you have created a dir `~/.local/sbin` within which you store the perl-file; this is to set the script as executable for current user only:
 
 ```bash
 $ chmod 0700 ~/.local/sbin/getCC
@@ -74,4 +76,32 @@ user	4m33.216s
 sys	4m47.984s
 ```
 
-PS    Stat extracts have been put in place to be able to use YAD (Yet Another Dialog) and tested by me as working, then I've lost that section of code. Ooops. Pull Requests welcomed.
+PS    Stat extracts have been put in place to be able to use YAD (Yet Another Dialog) and tested by me as working, then ~~I've lost that section of code. Ooops.~~ The launch code is within `browseCC`, but that code is unfinished.
+
+## *Begin*
+The following will assume that you have created a dir `~/.local/sbin` within which you store the bash-file; this is to set the script as executable for current user only:
+
+```bash
+$ chmod 0700 ~/.local/sbin/browseCC
+$ la ~/.local/sbin/browseCC
+-rwx------ 1 user user 10488 Apr 25 18:06 /home/user/.local/sbin/browseCC
+```
+It works fine, and the example of calling it is:
+
+```bash
+$ ~/.local/sbin/browseCC ~/Personal/ChromeCache
+1. Checking required files … FAD: TLS:  (all required files appear installed just fine)
+2. Checking required apps … 
+awk: GNU Awk 5.1.0, API: 3.0 (GNU MPFR 4.1.0, GNU MP 6.2.1)
+convert: Version: ImageMagick 6.9.11-60 Q16 x86_64 2021-01-25 https://imagemagick.org
+fgrep: grep (GNU grep) 3.6
+sed: /bin/sed (GNU sed) 4.7
+sort: sort (GNU coreutils) 8.32
+tput: ncurses 6.2.20201114
+yad: 0.40.0 (GTK+ 3.24.24)
+
+Display Summary of files available:
+Now to load your selected filetypes from $FAD to $SUM:
+Extracting #59931 lines (for 3807 files) from 59990 lines
+```
+What it can NOT do is extract a selected Image file from the dir to another place, nor search within text files.  Pull Requests welcomed.
