@@ -103,8 +103,8 @@
    if(!`$CONVRT --version`) { die "!Fatal Error! convert is NOT installed.\nRequired to produce thumbnails. Exiting now."; }
    if(!`$DD --version`) { die "!Fatal Error! dd is NOT installed.\nRequired for file extraction. Exiting now."; }
    if(!`$GUNZIP --version`) { die "!Fatal Error! Gunzip is NOT installed.\nRequired for file decompression (gzip, compress, pack). Exiting now."; }
-   if(!`ls $IN`) { die "!Fatal Error! The dir “\$IN” is NOT available. Required for all cache input.\nHave you checked all Global CONSTANTS? Exiting now."; }
-   if(!`ls $OUT`) { die "!Fatal Error! The dir “\$OUT” is NOT available. Required for all cache output.\nHave you checked all Global CONSTANTS? Exiting now."; }
+   if(!  -d "$IN") { die "!Fatal Error! The dir “\$IN” ($IN) does NOT exist. Required for all cache input.\nHave you checked all Global CONSTANTS? Exiting now."; }
+   if(!  -d "$OUT") { die "!Fatal Error! The dir “\$OUT” ($OUT) is NOT available. Required for all cache output.\nHave you checked all Global CONSTANTS? Exiting now."; }
    print STDERR "(all required apps appear to be installed just fine)\n";
 
    print STDERR "Now extract files into \$OUT=$OUT:\n";
