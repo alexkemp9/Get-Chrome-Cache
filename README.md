@@ -112,5 +112,6 @@ Selecting one of the image files will show all thumbnails for that filetype (thi
 Now to load your selected filetypes from $FAD to $SUM:
 Extracting #59931 lines (for 3807 files) from 59990 lines
 ```
+![yad dialog2](https://github.com/alexkemp9/Get-Chrome-Cache/blob/main/Screenshot_2023-05-31_23-50-35.png)
 
 What it can NOT do is extract a selected Image file from the dir to another place, nor search within text files.  Pull Requests welcomed.
