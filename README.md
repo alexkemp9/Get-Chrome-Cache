@@ -101,7 +101,16 @@ tput: ncurses 6.2.20201114
 yad: 0.40.0 (GTK+ 3.24.24)
 
 Display Summary of files available:
+```
+And here is what the YAD window looks like (swift appearance):
+
+![yad dialog 1](https://github.com/alexkemp9/Get-Chrome-Cache/blob/main/Screenshot_2023-05-31_23-28-47.png)
+
+Selecting one of the image files will show all thumbnails for that filetype (this takes some time to appear):
+
+```bash
 Now to load your selected filetypes from $FAD to $SUM:
 Extracting #59931 lines (for 3807 files) from 59990 lines
 ```
+
 What it can NOT do is extract a selected Image file from the dir to another place, nor search within text files.  Pull Requests welcomed.
