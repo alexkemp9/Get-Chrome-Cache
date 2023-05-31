@@ -1,0 +1,338 @@
+#!/usr/bin/perl
+   # get Chrome Cache
+   # suggestion: save as ~/.local/sbin/getCC; chmod 0700
+
+   #  A PERL script to iterate through Chromium/Chrome 'Cache_Data/' dir
+   #+ & extract all http-delivered files stored within those data-files
+
+   # 2023-03-30:         Added $TLSs + $YAD (text-files within $OUT for later use by yad)
+   # 2023-03-21:         Finally found location of URL-length
+   #           +         (& thus how to find start of content for all files)
+   # 2023-03-16: bugfix: Account for Content-Encoding invalidating file-magic
+   # 2023-03-12:         Account for multiple http version + 200|203 status
+   # 2023-03-08: bugfix: COUNT removed; LEN used instead
+   #           +        (FOFF used for BEG, not COUNT)
+   #           +         brotli now works
+   #           +        (no magic for brotli (a mistake imo))
+   # 2023-03-07: bugfix: corrected miss on most magic files (my bad)
+   #           +         excluded compound header fields to eliminate wrong values
+   #              added: $FOFF (diff between HTTP-begin ($END - $LEN) & magic-begin ($BEG))
+   #           +        (*every* file with both $BEG & $LEN has diff == x34) (h-begin is bigger)
+   #           +   thus: if no magic but LEN then BEG = END - LEN - 52
+   #           +         if magic but no LEN then LEN = END - BEG - 52 (yes, this *does* happen)
+   # 2023-03-05: bugfix: coded to exclude 711 zero-length files
+   #           +         account for multiple-same-value $mime (fixes ~1000 gif + jpg files)
+   #           +         added 'Content-Encoding:br' Brotli compression
+   #           +        (you may need 'sudo apt install brotli' to view those files)
+
+   use strict;
+   use warnings;
+   use autodie;
+   use Carp;
+   use File::stat; # qw(:FIELDS);
+   use experimental qw( switch );
+   use POSIX qw( strftime );
+   use Term::ANSIScreen qw/:cursor :screen/;
+
+   # https://metacpan.org/pod/Term::ANSIScreen
+
+   # Global CONSTANTS
+   my $H     = "/home/alexk";                                          # change if wrong location (Home)
+   my $BROTLI= "/usr/bin/brotli";                                      # - ditto -
+   my $CC    = "$H/Personal/ChromeCache";                              # - ditto - (see $OUT)
+   my $CONVRT= "/usr/bin/convert";                                     # - ditto -
+   my $DD    = "/bin/dd";                                              # - ditto -
+   my $GUNZIP= "/bin/gunzip";                                          # - ditto -
+   my $IN    = "$H/.cache/chromium/Default/Cache/Cache_Data";          # - ditto - (Chromium cache folder)
+   my $OUT   = "$CC/Files";                                            # - ditto - (Chromium extract folder)
+   my $TOUCH = "/usr/bin/touch";                                       # - ditto -
+   my $UNBROT= "$BROTLI -d";                                           # - ditto -
+
+   my $CLLINE= clline();
+   my $COUNT = 0;                                                      # Tracks number of files in $IN
+   my $EXT   = 0;                                                      # Tracks number of files extracted from $IN
+   my $FOFF  = 52;                                                     # Offset of HTTP-begin from magic-eof (BEG) + LEN
+   my $HTTP  = "HTTP/1.1 200";                                         # '200 OK' not in all files
+   my $IMGs  = "gif ico jpg jpeg png tiff webp";                       # Test string for producing thumbnails
+   my $MEOF  = "\x{d8}\x{41}\x{0d}\x{97}\x{45}\x{6f}\x{fa}\x{f4}";     # Magic End bits (last 8 bytes of every simple cache Entry file data record)
+   my $MENT  = "\x{30}\x{5c}\x{72}\x{a7}\x{1b}\x{6d}\x{fb}\x{fc}";     # Magic Start bits (1st 8 bytes of every simple cache Entry file data record)
+   my $MURL  = "_dk_";                                                 # Magic Start for URL (url follows within cache Entry file data record)
+   my $TLSs  = "$OUT/tls.txt";                                         # TLS (3-letter suffix) list for yad
+   my $THUMBs= "thumb";                                                # prefix string for thumbnails
+   my $YAD   = "$OUT/yad.txt";                                         # Column values list for yad
+
+   # save algorithm:
+   # 1) $URL/@URL: find $key_length from header
+   # 2) $BEG;$END;$LEN: obtain data start+end (from $key_length + $MEOF)
+   # 3) only save HTTP 200 files ($HTTP)
+   # 4) $HTTP;$BROTLI;$GZIP;$MIME;$MOD;$TLS: obtain http header fields (from $MEOF + $FOFF)
+   # 5) extract section $BEG to $END from $IN file into $OUT dir
+   # 6) $MOD: touch file to conform with http header date
+   # 7) $BROTLI;$GZIP: decompress gzip/brotli files
+   # 8) print column values for later use by YAD
+
+   # Stats 2023-03-06:
+   # 10978 HTTP 200 from 23594 files in Cache_Data
+   #     6 do NOT contain a MIME field
+   # 10979 files saved to disk (real	1m23.219s)
+
+   # chromium cache in 2023 is a "simple cache"
+   # see https://www.chromium.org/developers/design-documents/network-stack/disk-cache/very-simple-backend/
+   # see https://chromium.googlesource.com/chromium/src/+/HEAD/net/disk_cache/simple/simple_entry_format.h
+   # see https://github.com/JimmXinu/FanFicFare/blob/main/fanficfare/browsercache/browsercache_simple.py
+   # start-of-record magic-marker == 30 5c 72 a7 1b 6d fb fc
+   #   end-of-record magic-marker == d8 41 0d 97 45 6f fa f4
+   # (data ends immediately before eor)
+   # (http header starts 44 bytes after eor, and thus 44+8=52 bytes (\x34) after end-of-data)
+   # (eor also ends file; 16 bytes then follow to actual end-of-file)
+   # from FFF: (finally found url-length location)
+   # cache Entry-file header = struct.Struct('<QLLLL') [little-endian | 8-byte | 4-byte | 4-byte | 4-byte | 4-byte)
+   # (magic, version, key_length, key_hash, padding) = shformat.unpack(data)
+   # Parse Chrome Cache File; see https://github.com/JimmXinu/FanFicFare/blob/main/fanficfare/browsercache/chromagnon/cacheParse.py
+
+   # internal subroutines:
+   sub YCCOM {                                                         # "you can count on me" (print # of file extracted)
+      ++$EXT; loadpos; print $CLLINE;
+      print "Extracting #$EXT of $COUNT files";                        # clline == 'Clear current row, set cursor to 1st col'
+      if( $EXT >= $COUNT ) { print "\n"; cldown(); print "The extraction is now complete.\n"; }
+   } # YCCOM ()
+
+   # Checking required installations
+   print STDERR "Checking required installations … ";
+   if(!`$BROTLI --version`) { die "!Fatal Error! Brotli is NOT installed.\nRequired for Decompression. Exiting now."; }
+   if(!`$CONVRT --version`) { die "!Fatal Error! convert is NOT installed.\nRequired to produce thumbnails. Exiting now."; }
+   if(!`$DD --version`) { die "!Fatal Error! dd is NOT installed.\nRequired for file extraction. Exiting now."; }
+   if(!`$GUNZIP --version`) { die "!Fatal Error! Gunzip is NOT installed.\nRequired for file decompression (gzip, compress, pack). Exiting now."; }
+   if(!`ls $IN`) { die "!Fatal Error! The dir “\$IN” is NOT available. Required for all cache input.\nHave you checked all Global CONSTANTS? Exiting now."; }
+   if(!`ls $OUT`) { die "!Fatal Error! The dir “\$OUT” is NOT available. Required for all cache output.\nHave you checked all Global CONSTANTS? Exiting now."; }
+   print STDERR "(all required apps appear to be installed just fine)\n";
+
+   print STDERR "Now extract files into \$OUT=$OUT:\n";
+   savepos;
+
+   # Begin the extraction
+   opendir( my $d, "$IN") or die "Cannot open directory $IN";          # Open cache dir
+   my @list 
+      = grep { 
+         !/^\.\.?$/                                                    # miss /. + /.. files
+         && -f "$IN/$_"                                                # is a file (not dir, etc)
+	} readdir( $d );
+   closedir( $d );
+   $COUNT = @list;                                                     # number of items in array, and thus within cache dir
+   # init $YAD (truncating existing content)
+   open( my $fhy, '>:encoding(UTF-8)', $YAD ) or die "Could not open file '$YAD' $!"; close( $fhy ) or die "could not close $YAD";
+   foreach my $f (@list) {                                             # Iterate through each cached data-file
+      YCCOM();                                                         # print to terminal updated number of files extracted
+#     my $f    = "be75a13d44e548da_0";
+      # section variables
+      my $BEG  = -1;                                                   # Extract begins (bytes)
+      my $BROTLI= 0;                                                   # brotli encoding (0/1)
+      my $DOMAIN= '';                                                  # shortened version of URL for yad
+      my $END  = -1;                                                   # Extract ends   (bytes)
+      my $GZIP = 0;                                                    # gzip encoding (0/1)
+      my $HPOS = -1;                                                   # 'HTTP' string begins (bytes)
+      my $HSTA = -1;                                                   # 'HTTP' status string (only interested in '200' or '203')
+      my $HVER = '';                                                   # 'HTTP' version string (eg '1.1')
+      my $LEN  = -1;                                                   # content-length
+      my $MAGIC= '';
+      my $MIME = "";                                                   # content-type
+      my $MOD  = "";                                                   # last-modified
+      my $OFF  = -1;                                                   # Offset of magic from file beginning
+      my $thumb= "";                                                   # thumbnail source
+      my $thumbnail= "";                                               # thumbnail name
+      my $TLS  = "";                                                   # TLS==Three Letter Suffix
+      my $URL  = "";                                                   # url within cache Entry file
+      my @URL  = "";                                                   # same url as an array
+      my $UPOS = "";                                                   # position of url start in Entry file
+      open my $fh, '<:raw', "$IN/$f" or die "Cannot open file $IN/$f";
+
+      # 1 Obtain url length then url
+      # $key_length starts from byte 24 (\x18), normally begins with an 8-byte string '1/0/_dk_', then stretches to the end of the URL sequence
+      # the std 8-byte string indicates that two streams (1 + 0) are included within the file
+      # the request-url sequence is 2 x (normally-identical) base urls then the full request url, each separated by a single space
+      # data supplied to request url begins immediately after the url, and ends immediately before the $MEOF magic-marker
+      # http response headers begin 44 bytes after the end of $MEOF, starting with HTTP Status string at $HPOS
+      # none of the "std" response headers can be *expected* to exist, though most do
+      # all sorts of stuff exists after initial response header bundle, many of which I do not understand
+      #+ including content-servers such as amazon, certificates, proxy-servers, others
+      # this second stream (for std 2-stream files) ends with another $MEOF 16 bytes (\x10) before eof
+      # eg1: "1/0/_dk_https://bbc.co.uk https://bbc.co.uk https://static.files.bbci.co.uk/core/bundle-service-bar.003e5ecd332a5558802c.js"
+      #  \x18 ^       ^ $UPOS (=32 =\x20)                ($key_length =123 =\x7b; note: 24+123 =147 =\x93)                         \x93 ^
+      # eg2: "d8410d97 456ffaf4 01000000 24be2bf3 8d010000000000005814000003654702 acd8b17d9a552f00b8a4b27d9a552f00 40040000 HTTP/1.1 200"
+      # \x220 ^           \x228 ^           \x230 ^                          \x240 ^                          \x250 ^        ^ $HPOS (=596 =\x254)
+      my $bytes_read = read $fh, my $bytes, 24;
+      die "Got $bytes_read but expected 24" unless $bytes_read == 24;
+      my ($magic, $version, $key_length, $key_hash, $padding) = unpack 'a8 a4 a4 a4 a4', $bytes;
+      if( unpack('Q', $magic ) ne unpack('Q', $MENT )) {
+         $magic = unpack('H16', $magic );
+         $MENT = unpack('H16', $MENT );
+         die "'$IN/$f' is not a cache entry file, wrong magic number\n (got '$magic' not '$MENT')";
+      }
+      seek( $fh, 0, 0 );                                               # return to start of file
+      read( $fh, my $cache_buffer, -s "$IN/$f" );                      # put whole file in $cache_buffer
+      close( $fh ) or die "could not close $IN/$f";
+      # Obtain url
+      if( $cache_buffer =~ /$MURL/ ) {
+         $UPOS = $-[0] + 4;                                            # url begins immediately *after* marker string
+         $key_length=unpack('L', $key_length );
+         $key_hash  =unpack('H16', $key_hash );
+         $URL  = substr( $cache_buffer, $UPOS, $key_length - ($UPOS - 24));
+         @URL  = split(' ', $URL );
+      }
+
+      # 2 Obtain data start+end
+      $BEG = $key_length + 24;
+      $END = index( $cache_buffer, "$MEOF", $BEG);
+      if( $END < 1 ) {
+         print STDERR "'$IN/$f': error finding end of data at $0 line:". __LINE__ ."\n";
+         next;                                                         # immediately skips up to foreach() + increments $f
+      } else {
+         if( $BEG == $END ) {                                          # yes, some pages have Content-Length:0
+            $LEN = -1;
+         } else {
+            $LEN = $END - $BEG;
+         }
+      }
+
+      # 3 Only extract from HTTP 200|203
+      if( $cache_buffer =~ /\x{00}\x{00}HTTP\/(\d.\d*)\s(200|203)/i ) {
+         $HPOS = $-[0] + 2;
+         if( $HPOS != $END + $FOFF) {
+            print STDERR "'$IN/$f':  error finding start of http at $0 line:". __LINE__ ."\n";
+            next;                                                      # immediately skips up to foreach() + increments $f
+         }
+         $HVER = "$1";                                                 # http version; always HTTP/1.1 for me
+         $HSTA = "$2";                                                 # http status; we are only interested in 200 or 203
+         $HTTP = "HTTP/$HVER $HSTA";
+         # 4 Obtain http header fields
+         if( $LEN > 0 ) {                                              # yes, some pages have Content-Length:0
+            if( $cache_buffer =~ /\x00Content-Encoding:\s*br/i )   { $BROTLI = 1; }
+            if( $cache_buffer =~ /\x00Content-Encoding:\s*gzip/i ) { $GZIP   = 1; }
+            if( $cache_buffer =~ /\x00Content-Length:\s*(\d+)/i )  {
+               if( $1 != $LEN ) {
+                  print STDERR "'$IN/$f': data-length \$LEN=$LEN differs from http Content-Length=$1 at $0 line:". __LINE__ ."\n";
+               }
+               if( !$1 ) { print STDERR "'$IN/$f': len=0 at $0 line:". __LINE__ ."\n"; }
+            }
+            if( $cache_buffer =~ /\x00Last-Modified:\s*([ A-Za-z0-9,:]+)/i ) {
+               $MOD = $1;                                              # some web servers ignore case + introduce spaces!
+            } else {
+               if( $cache_buffer =~ /\x00Date:\s*([ A-Za-z0-9,:]+)/i ) {# did page did not want to be cached? (Chromium did it anyway!)
+                  $MOD = $1;                                           # (all pages should have a date (or a Date))
+               }
+            }
+            if( $cache_buffer =~ /\x00Content-Type:\s*([a-z-]+\/[a-z0-9.+-]+)/i ) {
+               $MIME = $1;
+            } # variable $1 NOT reset on failed match (v stupid)
+            # set $DOMAIN (another value used later by yad)
+            if( $URL[2] =~ /^.*\/[^\/](.*)$/ ) {
+               my $temp = $1;
+               if( length( $1 ) > 15 ) { $temp = substr( $1, -15); }   # some are unbelievably long
+               my $search  = "&";                                      # GTK throws warnings if url contains bare '&'
+               my $replace = "&amp;";
+               $temp       =~ s/$search/$replace/g;
+               $DOMAIN = $URL[0]. "/.../$temp";
+            } else {
+               $DOMAIN = $URL[0]. "/(bad-regex)";
+            }
+         } else { next; } # if( $LEN > 0 )
+
+         # easy to mixup mime/media-types & encoding (compression schemes) here
+         # Content-Type     == mime-type          refers to the type of file that is being transferred
+         # Content-Encoding == compression scheme refers to the type of compression used during transfer
+         # so, a text file (js txt xml, etc) with gzip magic will be a gzipped-textfile (eg file.xml.gz)
+         # gzip encoding (+ brotli) are only support; deflate no support, compress not even mentioned
+         # see https://httpd.apache.org/docs/current/mod/mod_deflate.html
+         # see https://www.iana.org/assignments/media-types/media-types.xhtml
+         given( $MIME ) {
+            when ('application/font-woff')   { $MAGIC = 'wOFF';                           $OFF = 0; $TLS = 'woff'; }
+            when ('application/font-woff2')  { $MAGIC = 'wOF2';                           $OFF = 0; $TLS = 'woff2'; }
+            when ('application/javascript')  { $MAGIC = "\x{1f}\x{8b}\x{08}";             $OFF = 0; $TLS = 'js'; }   # magic for gzip encoding
+            when ('application/json')        { $MAGIC = "\x{1f}\x{8b}\x{08}";             $OFF = 0; $TLS = 'json'; } # magic for gzip encoding
+            when ('application/manifest+json'){ $MAGIC = "\x{1f}\x{8b}\x{08}";            $OFF = 0; $TLS = 'json'; } # magic for gzip encoding
+            when ('application/x-javascript'){ $MAGIC = "\x{1f}\x{8b}\x{08}";             $OFF = 0; $TLS = 'js'; }   # magic for gzip encoding
+            when ('application/xml')         { $MAGIC = "\x{1f}\x{8b}\x{08}";             $OFF = 0; $TLS = 'xml'; }  # magic for gzip encoding
+            when ('binary/octet-stream')     { $MAGIC = "GIF89a";                         $OFF = 0; $TLS = 'gif'; }
+            when ('font/ttf')                { $MAGIC = "\x{00}\x{01}\x{00}\x{00}\x{00}"; $OFF = 0; $TLS = 'ttf'; }
+            when ('font/woff')               { $MAGIC = 'wOFF';                           $OFF = 0; $TLS = 'woff'; }
+            when ('font/woff2')              { $MAGIC = 'wOF2';                           $OFF = 0; $TLS = 'woff2'; }
+            when ('image/gif')               { $MAGIC = 'GIF87a';                         $OFF = 0; $TLS = 'gif'; }
+#           when ('image/gif')               { $MAGIC = 'GIF89a';                         $OFF = 0; $TLS = 'gif'; }
+            when ('image/jpeg')              { $MAGIC = 'JFIF';                           $OFF = 6; $TLS = 'jpg'; }
+#           when ('image/jpeg')              { $MAGIC = 'Exif';                           $OFF = 6; $TLS = 'jpeg'; }
+#           when ('image/jpeg')              { $MAGIC = "\x{ff}\x{d8}\x{ff}\x{e0}";       $OFF = 6; $TLS = 'jpg'; }
+            when ('image/png')               { $MAGIC = "\x{89}PNG";                      $OFF = 0; $TLS = 'png'; }
+            when ('image/svg+xml')           { $MAGIC = "\x{1f}\x{8b}\x{08}";             $OFF = 0; $TLS = 'svg'; }  # magic for gzip encoding
+            when ('image/vnd.microsoft.icon'){ $MAGIC = "\x{00}\x{00}\x{01}\x{00}";       $OFF = 0; $TLS = 'ico'; }
+            when ('image/webp')              { $MAGIC = 'RIFF';                           $OFF = 0; $TLS = 'webp'; }
+            when ('image/x-icon')            { $MAGIC = "\x{00}\x{00}\x{01}\x{00}";       $OFF = 0; $TLS = 'ico'; }
+            when ('text/css')                { $MAGIC = "\x{1f}\x{8b}\x{08}";             $OFF = 0; $TLS = 'css'; }  # magic for gzip encoding
+            when ('text/fragment+html')      { $MAGIC = "\x{1f}\x{8b}\x{08}";             $OFF = 0; $TLS = 'htm'; }  # magic for gzip encoding
+            when ('text/html')               { $MAGIC = "\x{1f}\x{8b}\x{08}";             $OFF = 0; $TLS = 'html'; } # magic for gzip encoding
+            when ('text/javascript')         { $MAGIC = "\x{1f}\x{8b}\x{08}";             $OFF = 0; $TLS = 'js'; }   # magic for gzip encoding
+            when ('text/plain')              { $MAGIC = "\x{1f}\x{8b}\x{08}";             $OFF = 0; $TLS = 'txt'; }  # magic for gzip encoding
+            when ('text/xml')                { $MAGIC = "\x{1f}\x{8b}\x{08}";             $OFF = 0; $TLS = 'xml'; }  # magic for gzip encoding
+            when ('video/mp4')               { $MAGIC = 'ftypisom';                       $OFF = 4; $TLS = 'mp4'; }  # most unlikely
+            default                          { $MAGIC = '';                               $OFF = 0; $TLS = ''; }
+         }
+         if( $TLS ) {
+            $thumb = ""; $thumbnail = "$OUT/$THUMBs-$f.$TLS";
+            open( my $fht, '>>:encoding(UTF-8)', $TLSs ) or die "Could not open file '$TLSs' $!";
+            print $fht ".$TLS $MIME\n";                                # yad will later convert into summary of files extracted
+            close( $fht ) or die "could not close $TLSs";
+            if( $IMGs =~ /$TLS/ ) { $thumb = "$OUT/$f.$TLS"; }         # $TLS is an image file, so make a thumbnail of it
+         } # if( $TLS )
+         # gzip encoding overrides file magic (is earlier in file-stream)
+         # brotli encoding overrides file magic (there is none)
+         if( $GZIP ) { $MAGIC = "\x{1f}\x{8b}\x{08}"; $OFF = 0; } elsif( $BROTLI ) { $MAGIC = ""; $OFF = 0; }
+         if( $MAGIC ) {
+            if( $MAGIC eq 'GIF87a') {                                  # account for gif + jpeg multiple $MAGIC
+               if( ! index( $cache_buffer, "$MAGIC" )) {
+                  $MAGIC = 'GIF89a';
+               }
+            } elsif( $MAGIC eq 'JFIF') {
+               if( ! index( $cache_buffer, "$MAGIC" )) {
+                  $MAGIC = 'Exif';
+                  $TLS   = 'jpeg';
+                  if( ! index( $cache_buffer, "$MAGIC" )) {
+                     $MAGIC = "\x{ff}\x{d8}\x{ff}\x{e0}";
+                     $TLS   = 'jpg';
+                  }
+               }
+            }
+         } # if( $MAGIC )
+         # suffixes (holy m$)
+         if( $TLS ) {
+            $TLS = ".$TLS";
+            if( $GZIP || $BROTLI ) {                                   # compression-encoding
+               if( $GZIP ) { $TLS = "$TLS.gz"; } else { $TLS = "$TLS.br"; }
+            }
+         }
+         # 5 extract files to $OUT dir
+         if( $BEG > -1 && $LEN > -1 ) {
+            `$DD if="$IN/$f" of="$OUT/$f$TLS" skip=$BEG count=$LEN iflag=skip_bytes,count_bytes status=none`;
+            # 6 set the date to last-modified
+            if( $MOD ) { `$TOUCH "$OUT/$f$TLS" -d "$MOD"`; }
+            # 7 decompress if necessary
+            if( $GZIP || $BROTLI ) {                                   # compression-encoding
+               if( $GZIP ) {                                           # decompressed; .gz/.br suffix auto-removed
+                  `$GUNZIP "$OUT/$f$TLS"`;                             # original file removed; date retained
+                  if( $TLS =~ /^(.*)\.gz$/ ) { $TLS = $1; }
+               } else {
+                  `$UNBROT -j "$OUT/$f$TLS"`;
+                  if( $TLS =~ /^(.*)\.br$/ ) { $TLS = $1; }
+               }
+            }
+            # 8 print thumbnails
+            if( $thumb ) { `$CONVRT -thumbnail 60 "$thumb" "$thumbnail";` } else { $thumbnail = "$thumb";}
+            # 9 print array of column values to file for later use by YAD
+            my $stat  = stat("$OUT/$f$TLS") or die "No stats for $OUT/$f$TLS $!";
+            my $mtime = $stat->mtime;                                  # (mtime) last modification time, in secs since the epoch
+            my @mtime = localtime $mtime;
+            my $date  = strftime("%Y-%m-%d", @mtime);                  # eg 2023-03-25
+            open( my $fhy, '>>:encoding(UTF-8)', $YAD ) or die "Could not open file '$YAD' $!";
+            print $fhy "$DOMAIN\n$MIME\n$LEN\n$date\n$thumbnail\n";    # yad requires *each* field + record separated by NL
+            close( $fhy ) or die "could not close $YAD";
+         } # lots of Content-Length:0 files
+      } # if( $cache_buffer =~ /\x{00}\x{00}HTTP\/(\d.\d*)\s(200|203)/i ) # other pages mostly HTTP 204 No Content
+   } # foreach my $f (@list)
