@@ -106,7 +106,7 @@ And here is what the YAD window looks like (swift appearance):
 
 ![yad dialog 1](https://github.com/alexkemp9/Get-Chrome-Cache/blob/main/Screenshot_2023-05-31_23-28-47.png)
 
-Selecting one of the image files will show all thumbnails for that filetype (this takes some time to appear):
+Selecting one of the image files will show all thumbnails for that filetype (this takes some time to appear) (I watch far too much YT):
 
 ```bash
 Now to load your selected filetypes from $FAD to $SUM:
