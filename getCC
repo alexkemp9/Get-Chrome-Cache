@@ -37,7 +37,7 @@
    # https://metacpan.org/pod/Term::ANSIScreen
 
    # Global CONSTANTS
-   my $H     = "/home/alexk";                                          # change if wrong location (Home)
+   my $H     = "/home/user";                                           # change if wrong location (Home)
    my $BROTLI= "/usr/bin/brotli";                                      # - ditto -
    my $CC    = "$H/Personal/ChromeCache";                              # - ditto - (see $OUT)
    my $CONVRT= "/usr/bin/convert";                                     # - ditto -
