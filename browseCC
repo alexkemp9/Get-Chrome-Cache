@@ -1,5 +1,5 @@
 #!/bin/bash
-# .sbin/browseCC :: browse Chrome/Chromium cached-files
+# .local/sbin/browseCC :: browse Chrome/Chromium cached-files
 # to add webp file capability to imagemagick (and other GDK progs such as YAD):
 # sudo apt install webp-pixbuf-loader
 
