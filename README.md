@@ -47,3 +47,32 @@ $ la ~/Personal/ChromeCache/Files | tail
 -rw-r--r-- 1 user user  151425 May 31 21:50 tls.txt
 -rw-r--r-- 1 user user 1030722 May 31 21:50 yad.txt
 ```
+… and now a full extraction sequence with timings (those errors are *normal*; your browser hides them from you in the background then — for some bizarre reason — caches the file(s) nonetheless):–
+
+```
+$ time ~/.local/sbin/getCC
+Checking required installations … (all required apps appear to be installed just fine)
+Now extract files into $OUT=/home/user/Personal/ChromeCache/Files:
+Extracting #4489 of 23964 files'/home/user/.cache/chromium/Default/Cache/Cache_Data/c01c3521f74474f6_s': error finding end of data at /home/user/.local/sbin/getCC line:187
+Extracting #5561 of 23964 filesgzip: /home/user/Personal/ChromeCache/Files/8f86a375b9f22ab8_0: unknown suffix -- ignored
+Extracting #5569 of 23964 filesgzip: /home/user/Personal/ChromeCache/Files/5f4f7cf3619eb81e_0: unknown suffix -- ignored
+Extracting #6447 of 23964 filesgzip: /home/user/Personal/ChromeCache/Files/e45d7840df26c3c5_0: unknown suffix -- ignored
+Extracting #7755 of 23964 files'/home/user/.cache/chromium/Default/Cache/Cache_Data/2605dabe6db345f1_s': error finding end of data at /home/user/.local/sbin/getCC line:187
+Extracting #13721 of 23964 filesconvert: width or height exceeds limit `/home/user/Personal/ChromeCache/Files/828312e46e6364a5_0.png' @ error/cache.c/OpenPixelCache/3909.
+Extracting #14948 of 23964 filesgzip: /home/user/Personal/ChromeCache/Files/775aaee39e14bc01_0: unknown suffix -- ignored
+Extracting #15165 of 23964 filesconvert: profile 'icc': 'RGB ': RGB color space not permitted on grayscale PNG `/home/user/Personal/ChromeCache/Files/thumb-8c29387e3c4140b2_0.png' @ warning/png.c/MagickPNGWarningHandler/1668.
+Extracting #18635 of 23964 files'/home/user/.cache/chromium/Default/Cache/Cache_Data/f5494c459b5b4823_s': error finding end of data at /home/user/.local/sbin/getCC line:187
+Extracting #19067 of 23964 filesArgument "\0\0\0\0" isn't numeric in addition (+) at /home/user/.local/sbin/getCC line 184.
+'/home/user/.cache/chromium/Default/Cache/Cache_Data/index': error finding end of data at /home/user/.local/sbin/getCC line:187
+Extracting #23304 of 23964 files'/home/user/.cache/chromium/Default/Cache/Cache_Data/ea8757ff56f6c660_s': error finding end of data at /home/user/.local/sbin/getCC line:187
+Extracting #23782 of 23964 filesgzip: /home/user/Personal/ChromeCache/Files/c2fbaf419c83a8a8_0: unknown suffix -- ignored
+Extracting #23964 of 23964 files
+The extraction is now complete.
+
+real	10m13.586s
+user	4m33.216s
+sys	4m47.984s
+```
+
+PS    
+Stat extracts have been put in place to be able to use YAD (Yet Another Dialog) and tested by me as working, then I've lots the code. Ooops. Pull Requests welcomed.
