@@ -74,5 +74,4 @@ user	4m33.216s
 sys	4m47.984s
 ```
 
-PS    
-Stat extracts have been put in place to be able to use YAD (Yet Another Dialog) and tested by me as working, then I've lots the code. Ooops. Pull Requests welcomed.
+PS    Stat extracts have been put in place to be able to use YAD (Yet Another Dialog) and tested by me as working, then I've lost that section of code. Ooops. Pull Requests welcomed.
