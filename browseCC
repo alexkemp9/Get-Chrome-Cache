@@ -1,0 +1,267 @@
+#!/bin/bash
+# .sbin/browseCC :: browse Chrome/Chromium cached-files
+# to add webp file capability to imagemagick (and other GDK progs such as YAD):
+# sudo apt install webp-pixbuf-loader
+
+shopt -s expand_aliases
+alias Cldown="tput ed"          # clear from cursor to end of screen
+alias Clline="tput bce"         # (Background Colour Erase) + set cursor to the 1st column
+alias Loadpos="tput rc"         # Restore the (previously saved) cursor position
+alias Reset="tput sgr0"         # Reset text attributes to normal, not clearing screen
+alias Savepos="tput sc"         # Save the current cursor position
+
+# list of internal functions:
+# CECHO()                       # echo in magenta
+# CONSTANTS()                   # establish script constants
+# HELP()                        # prints out help
+# YCCOM()                       # "You Can Count On Me" (print # of file extracted)
+
+# ChromeCache dir locations
+# $CC is the home for $FILES, which itself is the dir that stores all the
+#  extracted CC files.
+# This script also uses $CC to store various text files used with YAD dialogs
+CC='';                          # established in CONSTANTS()
+TOTAL=0;                        # Tracks number of lines in $FAD
+EXT=0;                          # Tracks number of lines extracted from $FAD
+
+# app constants (use 'which awk', etc)
+AWK="/usr/bin/awk";
+CONVERT="/usr/bin/convert";
+FGREP="/bin/fgrep";
+RM="/bin/rm -f";
+SED="/bin/sed";
+SORT="/usr/bin/sort";
+UNIQ="/usr/bin/uniq -c";
+YAD="/usr/bin/yad";
+YAD_launch="$YAD --selectable-labels --multiple --center";
+
+CECHO ()                        # echo in magenta
+{
+black='\E[30;47m'
+red='\E[31;47m'
+green='\E[32;47m'
+yellow='\E[33;47m'
+blue='\E[34;47m'
+magenta='\E[35;40m'             # magenta foreground, white background
+cyan='\E[36;47m'
+white='\E[37;47m'
+
+echo -en "$magenta"
+echo -n "${1}"                  # no newline
+Reset
+
+return
+} # CECHO ()
+
+CONSTANTS ()
+{
+CC="$1";
+a=${CC:0:2}; b="~/";
+if [[ "$a" = "$b" ]]            # supplied CC-EXTRACT-DIR needs tilde expansion to $HOME dir
+then
+   if [[ -z "$HOME" ]]          # $HOME is empty
+   then
+      CECHO "!\$HOME is empty!"; echo ", yet supplied CC-EXTRACT-DIR begins with a '\~/'";
+      echo "This script dies at this point. bfn on line: ${LINENO}." >&2;
+      exit 2;
+   else
+      CC=${CC/#\~/$HOME};       # see https://tldp.org/LDP/abs/html/refcards.html#AEN22828
+   fi
+fi
+# CC locations
+FILES="$CC/Files";              # dir that contains extracted files
+FAD="$FILES/yad.txt";           # one each/line of url+mime+size+date+thumb /file
+SUM="$CC/lines.txt";            # one each/line of count+tls+mime           /file
+TLS="$FILES/tls.txt";           # tls+mime for each file;                   TLS=='three-letter-suffix'
+UNIQUE="$CC/unique.txt";        # one line of      count+tls+mime           /unique combo tls+mime
+# 1. check for required files
+echo -n "1. Checking required files … ";
+echo -n "FAD: ";
+if [[ ! -s $FAD ]]; then
+   CECHO "!\$FAD (a required file) does not exist, or is empty!"; echo ". Exiting now on line: ${LINENO}." >&2;
+   exit 2
+fi
+echo -n "TLS: ";
+if [[ ! -s $TLS ]]; then
+   CECHO "!\$TLS (a required file) does not exist, or is empty!"; echo ". Exiting now on line: ${LINENO}." >&2;
+   exit 2
+fi
+echo " (all required files appear installed just fine)";
+# 2. check for required installations
+echo "2. Checking required apps … ";
+echo -n "awk: ";
+if ! $AWK --version | head -n1; then
+   CECHO "!Fatal Error!"; echo " awk is NOT installed. Exiting now on line: ${LINENO}." >&2;
+   exit 2
+fi
+echo -n "convert: ";
+if ! $CONVERT --version | head -n1; then
+   CECHO "!Fatal Error!"; echo " convert [part of IM6] is NOT installed. Exiting now on line: ${LINENO}." >&2;
+   exit 2
+fi
+echo -n "fgrep: ";
+if ! $FGREP --version | head -n1; then
+   CECHO "!Fatal Error!"; echo " fgrep [part of grep] is NOT installed. Exiting now on line: ${LINENO}." >&2;
+   exit 2
+fi
+echo -n "sed: ";
+if ! $SED --version | head -n1; then
+   CECHO "!Fatal Error!"; echo " sed is NOT installed. Exiting now on line: ${LINENO}." >&2;
+   exit 2
+fi
+echo -n "sort: ";
+if ! $SORT --version | head -n1; then
+   CECHO "!Fatal Error!"; echo " sort is NOT installed. Exiting now on line: ${LINENO}." >&2;
+   exit 2
+fi
+echo -n "tput: ";
+if ! tput -V; then
+   CECHO "!Fatal Error!"; echo " tput [part of ncurses] is NOT installed. Exiting now on line: ${LINENO}." >&2;
+   exit 2
+fi
+# yad can NOT be tested if script has 'set -e'
+#+since yad refuses to produce a zero exit status on success
+echo -n "yad: ";
+$YAD --version; ex=$?;
+if [[ $ex != 252 ]]; then
+   CECHO "!Fatal Error!"; echo " yad is NOT installed. Exiting now. \$ex=$ex on line: ${LINENO}." >&2;
+   exit 2
+fi
+# TOTAL
+TOTAL=(`wc -l $FAD`);
+} # CONSTANTS()
+
+HELP_SHORT="usage: $0 [Option] CC-EXTRACT-DIR
+option: -h show help";
+
+HELP ()
+{
+cat << EOF
+$HELP_SHORT
+
+Browse files that have been extracted from the Chrome/Chromium Cache (CC).
+CC-EXTRACT-DIR is the home dir for the dir that contains all files extracted
+from the CC (sorry, a touch complicated there). If...
+   CC-EXTRACT-DIR == '... /CC', and
+   FILES          == dir that contains extracted cache files, then
+   FILES          == '... /CC/FILES'
+
+This script is normally used in tandem with 'getCC'. That latter script — 
+normally stored in the same place as this script, and used first — makes the
+actual file extractions and then calls this script to browse those files.
+
+EOF
+} # HELP()
+
+YCCOM ()                        # "you can count on me" (print # of file extracted)
+{                               # commands are alias of perl commands as close as possible
+   EXT=$(( $1 ));
+   TOT=$(( $2 ));
+   TOTAL=$(( $3 ));
+   ((EXT++)); Loadpos; Clline;
+   echo -n "Extracting #$EXT lines (for $TOT files) from $TOTAL lines";
+   if (( $EXT >= $TOTAL )); then { echo; Cldown; echo "The extraction is now complete."; } fi;
+} # YCCOM ()
+
+# show HELP if no input
+if [ -z "$1" ]; then
+  CECHO "$HELP_SHORT." >&2; echo;
+  exit 2
+fi
+
+# expand help options (in this case, the only option)
+#while [ $# -gt 0 ]; do         # ’til we run out of parameters…
+  case "$1" in
+#    a|A|-a|-A|--add|--ADD)       ACTION=a;;
+#    c|C|-c|-C|--create|--CREATE) ACTION=c;;
+#    e|E|-e|-E|--export|--EXPORT) ACTION=e;;
+#    i|I|-i|-I|--import|--IMPORT) ACTION=i;;
+    h|H|-h|-H|--help|--HELP)     HELP; exit 0;;
+    *) CONSTANTS "$1";;
+  esac
+shift                           # check next parameter
+#done                           # only one parameter to check
+
+#Produce thumbnails if not-existing (now done in getCC)
+if ! ls "$FILES" | "$FGREP" thumb > /dev/null; then
+   echo; echo "First the script needs to create thumbnails for gif, ico, jpg, jpeg, png, tiff + webp files."; echo "This will take some time…";
+   cd $FILES;
+   echo "Starting GIF files…";
+   for i in `ls *.gif`; do $CONVERT -thumbnail 60 "$i" "thumb-$i"; done;
+   echo "Starting ICO files…";
+   for i in `ls *.ico`; do $CONVERT -thumbnail 60 "$i" "thumb-$i"; done;
+   echo "Starting JPG files…";
+   for i in `ls *.jpg`; do $CONVERT -thumbnail 60 "$i" "thumb-$i"; done;
+   echo "Starting PNG files…";
+   for i in `ls *.png`; do $CONVERT -thumbnail 60 "$i" "thumb-$i"; done;
+   echo "Starting TIFF files…";
+   for i in `ls *.tiff`; do $CONVERT -thumbnail 60 "$i" "thumb-$i"; done;
+   echo "Starting WEBP files…";
+   for i in `ls *.webp`; do $CONVERT -thumbnail 60 "$i" "thumb-$i"; done;
+fi;
+
+# yad requires text input from inside the declaration to be one-per-line-per-column
+# $TLS   ==   tls.txt:       tls+mime (one line for each file in $FILES; 2 concatenated values)
+# $UNIQUE==unique.txt: count+tls+mime (each line is unique,  composed of 3 concatenated values)
+# $SUM   == lines.txt: count+tls+mime (each value on a separate line)
+echo -e "\nDisplay Summary of files available:";
+HELP="Choose a file(s) then press 'OK' button to view\nImages will display a thumbnail\nText will allow searching a file";
+if [ -f "$UNIQUE" ]; then $RM "$UNIQUE"; fi; cat $TLS | $SORT | $UNIQ > $UNIQUE;
+if [ -f "$SUM" ];    then $RM "$SUM"; fi;    arr=(`cat "$UNIQUE"`); for val in "${arr[@]}"; do echo $val >> $SUM; done;
+items=(`cat "$SUM"`);
+DIALOG=$($YAD_launch --title="Chrome Cache: Files Summary" --text="$HELP" --height=600 --width=800 --grid-lines="both" --list \
+   --column "Number":NUM \
+   --column "File Suffix":TEXT \
+   --column "MIME":TEXT \
+   "${items[@]}"
+)
+ex=$?
+if [[ $ex > 0 ]]                # cancel, error, etc.
+then
+   CECHO "Exit status is $ex"; echo " ('Cancel'[1] or 'Esc'[252] pressed) on line: ${LINENO}." >&2;
+	exit 1
+fi
+# 'OK' button was pressed
+# place space-separated list of selected TLS into $tlss
+if [ -f "$SUM" ];    then $RM "$SUM"; fi;    tmp=$(echo -n "$DIALOG"); for val in "${tmp[@]}"; do echo "$val" >> $SUM; done;
+arr=(`cat "$SUM"`);
+for val in "${arr[@]}"; do tlss+="$(echo $val | $AWK 'BEGIN {FS="|" } { print $2." " }')"; done;
+# $tlss now contains space-separated array of each selected file TLS (there may be dupes; does not matter)
+# $FAD contains 5 lines (url+mime+size+date+thumb) for each file in the CC
+echo "Now to load your selected filetypes from \$FAD to \$SUM:"
+Savepos;
+if [ -f "$SUM" ];    then $RM "$SUM"; fi;
+n=0; tot=0;
+while IFS='' read -r line; do   # no word-splitting, leave '\' untouched
+   ((n++));                     # integer arithmetic
+   mod=$((n%5));                # ditto
+   if (( mod < 1 ));            # $mod==0 at 5,10,15,etc (thumb)
+   then
+      tls=${line##*.};          # capture tls for thumbnail (if $line a filename)
+      # is $tls not null & also one of $tlss? (a null $tls is *always* TRUE in the regex)
+      if [[ -n "$tls" ]] && [[ "$tlss" =~ "$tls" ]];
+      then                      # print 5 lines (from url to thumb) into $SUM
+         ((tot++));             # integer arithmetic
+         s=$((n-4));            # ditto
+         $SED -n "$s,+4p" "$FAD" >> "$SUM";
+         YCCOM $n $tot $TOTAL;
+      fi;
+   fi;
+done < $FAD;
+
+if [ ! -s "$SUM" ];             # $SUM is empty
+then
+   CECHO "!Unknown error!"; echo " ($SUM is empty) on line: ${LINENO}." >&2;
+	exit 1;
+fi;
+items=(`cat "$SUM"`);
+# cat $items | DIALOG=$($YAD_launch --height=600 --width=800 --grid-lines="both" --list --checklist \
+DIALOG=$($YAD_launch --fullscreen --height=600 --width=800 --grid-lines="both" --list \
+   --column "URL":TEXT \
+   --column "MIME":TEXT \
+   --column "Size":SZ \
+   --column "Date":TEXT \
+   --column "Image (thumbnail)":IMG \
+   --text "Select a file to save (there are $tot files in total)" \
+   "${items[@]}"
+)
