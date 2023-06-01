@@ -255,8 +255,8 @@ then
 	exit 1;
 fi;
 items=(`cat "$SUM"`);
-# cat $items | DIALOG=$($YAD_launch --height=600 --width=800 --grid-lines="both" --list --checklist \
-DIALOG=$($YAD_launch --fullscreen --height=600 --width=800 --grid-lines="both" --list \
+# 2023-06-01 REMOVED "--fullscreen" FROM NEXT LINE
+DIALOG=$($YAD_launch --height=600 --width=800 --grid-lines="both" --list \
    --column "URL":TEXT \
    --column "MIME":TEXT \
    --column "Size":SZ \
