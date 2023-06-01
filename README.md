@@ -76,7 +76,7 @@ user	4m33.216s
 sys	4m47.984s
 ```
 
-PS    Stat extracts have been put in place to be able to use YAD (Yet Another Dialog) and tested by me as working, then ~~I've lost that section of code. Ooops.~~ The launch code is within `browseCC`, but that code is unfinished.
+Stat extracts have been put in place to be able to use YAD (Yet Another Dialog); the launch code is within `browseCC`, but that code is unfinished.
 
 ## *Begin*
 The following will assume that you have created a dir `~/.local/sbin` within which you store the bash-file; this is to set the script as executable for current user only:
